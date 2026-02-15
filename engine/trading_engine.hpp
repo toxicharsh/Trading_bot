@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 #include <iostream>
 
 #include "../data/csv_feed.hpp"
@@ -13,7 +12,6 @@
 #include "../analytics/trade_logger.hpp"
 #include "../analytics/signal_logger.hpp"
 #include "../analytics/risk_logger.hpp"
-#include "../analytics/equity_logger.hpp" // ✅ ADD THIS
 
 namespace Engine
 {
@@ -29,11 +27,10 @@ namespace Engine
 
         Portfolio::Portfolio *portfolio;
 
-        // Loggers
+        // Loggers (thread-safe)
         Analytics::TradeLogger *trade_logger;
         Analytics::SignalLogger *signal_logger;
         Analytics::RiskLogger *risk_logger;
-        Analytics::EquityLogger *equity_logger; // ✅ ADD THIS
 
     public:
         TradingEngine(
@@ -43,7 +40,6 @@ namespace Engine
             Analytics::TradeLogger *tlog,
             Analytics::SignalLogger *slog,
             Analytics::RiskLogger *rlog,
-            Analytics::EquityLogger *elog, // ✅ ADD THIS
             double fee,
             double max_alloc)
             : symbol(sym),
@@ -53,8 +49,7 @@ namespace Engine
               portfolio(pf),
               trade_logger(tlog),
               signal_logger(slog),
-              risk_logger(rlog),
-              equity_logger(elog) // ✅ STORE IT
+              risk_logger(rlog)
         {
         }
 
@@ -65,7 +60,7 @@ namespace Engine
 
             if (!feed.load(csv_path, start, end))
             {
-                std::cout << "[ENGINE ERROR] Cannot load data: "
+                std::cout << "[ENGINE ERROR] Cannot load: "
                           << csv_path << "\n";
                 return;
             }
@@ -84,6 +79,7 @@ namespace Engine
                 // ===============================
                 auto sig = strategy.on_bar(bar, pos_qty);
 
+                // Log signal decision
                 signal_logger->log(
                     bar.date,
                     symbol,
@@ -96,20 +92,12 @@ namespace Engine
                          ? "SELL"
                          : "HOLD"));
 
-                // ===============================
-                // 3️⃣ Equity Snapshot ✅ LOG IT
-                // ===============================
-                double equity_before =
-                    portfolio->cash_balance() +
-                    pos_qty * bar.close;
-
-                equity_logger->log(bar.date, equity_before); // ✅ FIX
-
+                // HOLD → nothing to do
                 if (sig.direction == Core::Side::HOLD)
                     continue;
 
                 // ===============================
-                // 4️⃣ Risk Sizing
+                // 3️⃣ Risk Sizing
                 // ===============================
                 double cash_before = portfolio->cash_balance();
 
@@ -128,21 +116,21 @@ namespace Engine
                     continue;
 
                 // ===============================
-                // 5️⃣ Execute Trade
+                // 4️⃣ Execute Trade
                 // ===============================
                 auto fill = broker.execute(order, bar);
 
                 if (!portfolio->apply_fill(fill))
                     continue;
 
+                // ===============================
+                // 5️⃣ After Trade Snapshot
+                // ===============================
                 double cash_after = portfolio->cash_balance();
                 double pos_after = portfolio->position_qty(symbol);
 
-                double equity_after =
-                    cash_after + pos_after * bar.close;
-
                 // ===============================
-                // 6️⃣ Log Trade
+                // 6️⃣ Log Executed Trade
                 // ===============================
                 trade_logger->log(
                     bar.date,
@@ -155,8 +143,9 @@ namespace Engine
                     cash_after,
                     pos_qty,
                     pos_after,
-                    equity_before,
-                    equity_after);
+                    0, // equity handled centrally
+                    0  // equity handled centrally
+                );
             }
         }
     };

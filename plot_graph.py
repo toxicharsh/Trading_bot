@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 
 # Default file location
-file = "build/build/output/equity.csv"
+file = "../output/equity.csv"
 
 # Allow override
 if len(sys.argv) > 1:
